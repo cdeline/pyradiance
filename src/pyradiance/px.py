@@ -26,8 +26,8 @@ class Pcomb:
         inform: str = "a",
         fout: bool = True,
         header: bool = False,
-        expression: None | str = None,
-        source: None | str = None,
+        expression: None | str | Sequence[str] = None,
+        source: None | str | Sequence[str] = None,
     ):
         """combine Radiance pictures and/or float matrices
 
@@ -37,10 +37,9 @@ class Pcomb:
             inform: input data format. Default is "a" for ascii.
             fout: if True, write output to file
             header: if True, write header
-            expression: expression
-            source: source
+            expression: expression or list of expressions
+            source: source cal file or list of source cal files
         """
-        self.has_input = False
         self.stdin: None | bytes = None
         self.cmd = [str(BINPATH / "pcomb")]
         if xres is not None:
@@ -54,20 +53,30 @@ class Pcomb:
         if header:
             self.cmd.append("-h")
         if expression is not None:
-            self.cmd.extend(["-e", expression])
+            if isinstance(expression, str):
+                self.cmd.extend(["-e", expression])
+            else:
+                for expr in expression:
+                    self.cmd.extend(["-e", expr])
         if source is not None:
-            self.cmd.extend(["-f", source])
+            if isinstance(source, str):
+                self.cmd.extend(["-f", source])
+            else:
+                for src in source:
+                    self.cmd.extend(["-f", src])
+        # output dimensions alone are sufficient; no image input required
+        self.has_input = xres is not None and yres is not None
 
     def add(
         self,
-        image: Path | str | bytes,
+        image: "Path | str | bytes | Pcomb",
         original: bool = False,
         scaler: float = 1.0,
     ) -> "Pcomb":
         """Add images to command.
 
         Args:
-            image: Input image file or bytes
+            image: Input image file, bytes, or another Pcomb instance to pipe from
             original: keep original exposure
             scaler: Scaling factor
 
@@ -77,7 +86,12 @@ class Pcomb:
         if original:
             self.cmd.append("-o")
         self.cmd.extend(["-s", str(scaler)])
-        if isinstance(image, bytes):
+        if isinstance(image, Pcomb):
+            if self.stdin is not None:
+                raise ValueError("Only one piped/bytes input is allowed with pcomb.")
+            self.stdin = image()
+            self.cmd.append("-")
+        elif isinstance(image, bytes):
             if self.stdin is not None:
                 raise ValueError("Only one bytes input is allowed with pcomb.")
             self.stdin = image
@@ -112,6 +126,7 @@ def pcompos(
     label_height: None | int = None,
     ncols: None | int = None,
     anchor_point: None | Sequence[str] = None,
+    per_image_thresholds: None | Sequence[None | tuple[str, float]] = None,
 ) -> bytes:
     """Composite Radiance pictures
 
@@ -124,12 +139,15 @@ def pcompos(
         background: background color
         anchors: list of anchors
         header: set to False if want to reduce header
-        lower_threashold: lower threshold
-        upper_threshold: upper threshold
+        lower_threashold: lower threshold applied globally before all images
+        upper_threshold: upper threshold applied globally before all images
         label: label
         label_height: label height
         ncols: number of columns
         anchor_point: anchor point
+        per_image_thresholds: per-image threshold flags as a sequence of
+            None or (flag, value) tuples where flag is '+t' or '-t'.
+            Inserted immediately before each corresponding input image.
 
     Returns:
         bytes: output of pcompos
@@ -169,6 +187,9 @@ def pcompos(
         if not header:
             cmd.append("-h")
         for i, input in enumerate(inputs):
+            if per_image_thresholds is not None and per_image_thresholds[i] is not None:
+                flag, value = per_image_thresholds[i]
+                cmd.extend([flag, str(value)])
             if anchors is not None:
                 if anchors[i] is not None:
                     cmd.append(f"={anchors[i]}")

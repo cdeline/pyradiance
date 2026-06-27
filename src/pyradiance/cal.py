@@ -218,3 +218,57 @@ def rlam(
     if len(stdins) == 1:
         stdin = stdins[0]
     return sp.run(cmd, check=True, input=stdin, stdout=sp.PIPE).stdout
+
+@handle_called_process_error
+def histo(
+    xmin: int | float,
+    xmax: int | float,
+    nbins: None | int = None,
+    inp: None | str | Path | bytes = None,
+    cumulative: bool = False,
+    percent: bool = False,
+) -> bytes:
+    """Compute 1-dimensional histogram of N data columns.
+
+    Bins columnar data on stdin (or from a file) between the given minimum
+    and maximum values. If nbins is given, data is divided into that many
+    equal-width bins between xmin and xmax. If nbins is omitted, xmin and
+    xmax are treated as integers and the number of bins equals their
+    difference plus one.
+
+    The output has N+1 columns: the first is the centroid (or upper bound
+    when cumulative=True) of each bin, and the remaining N columns are the
+    frequencies for each input column.
+
+    Args:
+        xmin: minimum value (lower bound of histogram range)
+        xmax: maximum value (upper bound of histogram range)
+        nbins: number of equal-width bins; if None, xmin/xmax are treated
+            as integers and nbins = xmax - xmin + 1
+        inp: input data as a file path, or bytes, or None to read from stdin
+        cumulative: if True, compute cumulative histogram (-c); upper bin
+            value is printed instead of centroid
+        percent: if True, report percentage of total input lines rather than
+            absolute counts (-p)
+
+    Returns:
+        bytes: output of histo
+    """
+    cmd = [str(BINPATH / "histo")]
+    if cumulative:
+        cmd.append("-c")
+    if percent:
+        cmd.append("-p")
+    cmd.extend([str(xmin), str(xmax)])
+    if nbins is not None:
+        cmd.append(str(nbins))
+    stdin = None
+    if inp is None:
+        pass
+    elif isinstance(inp, bytes):
+        stdin = inp
+    elif isinstance(inp, (str, Path)):
+        cmd.append(str(inp))
+    else:
+        raise TypeError(f"inp must be None, str, Path, or bytes, not {type(inp)}")
+    return sp.run(cmd, check=True, input=stdin, stdout=sp.PIPE).stdout
